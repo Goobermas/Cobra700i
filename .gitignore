@@ -1,0 +1,9 @@
+# generated analysis output and working files
+/out/
+/work/
+/tools/binutils-2.42/
+__pycache__/
+*.pyc
+/tools/binutils.tar.xz
+/tools/*.log
+/tools/build.status
