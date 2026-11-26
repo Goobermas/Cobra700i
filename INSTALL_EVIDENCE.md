@@ -14,6 +14,11 @@ S311FE7F5D008FFFFFFFFFFFFFFFFFFFFFFF90  ; data at 0xFE7F5D00
 S309FE7F5D10FFFFFFFF10
 ```
 
+> **Corrected in `STARTUP_AND_CONTAINER.md`.** The `0xFE7F5D00` records are an eight-record
+> option/header block; the executable image in the same file starts at **`0xFFF00000`**, the
+> flat image's own space. The format objection below is withdrawn; the installation evidence
+> gap (§3) is not.
+
 Data addresses begin at **`0xFE7F5D00`**, not `0xFFF00000`. So the `.mot` is not a
 straight transcript of the flash we reverse-engineered: the updater's address space differs
 from the CPU's runtime address space (an offset/relocation, or a different device in the file
