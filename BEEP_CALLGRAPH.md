@@ -117,6 +117,22 @@ fff93bfa:  mov.l #0x19de3, r14
 fff93c00:  movu.b [r14], r14         ; state = [0x19DE3]
 ```
 
+**Arming.** The bit 5 flag is set by `0xFFFA606E(uint8 double_beep)` — a 23-byte leaf with
+17 callers — which also copies its argument into `136[0x4C5D4]`:
+
+```
+fffa606e:  sub   #4, r0
+fffa6070:  mov.b r1, 3[r0]
+fffa6072:  mov.l #0xaeb6, r14
+fffa6078:  bset  #5, [r14].b      ; arm
+fffa607a:  mov.l #0x4c5d4, r14
+fffa6080:  mov.b 3[r0], 136[r14]  ; double-pulse flag
+fffa6084:  rtsd  #4
+```
+
+It carries no band information, which is why a band-aware engine needs a separate latch;
+see `BAND_AWARE_ENGINE.md` §2.4.
+
 The state byte `0x19DE3` selects the branch; the counter `84[0x3AFC4]` is compared against
 50 and 30:
 

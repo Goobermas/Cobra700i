@@ -3,6 +3,11 @@
 Phase: design only. **No firmware image was produced, modified or flashed.** Every
 number below is either read out of the image or measured; the simulator is offline.
 
+> **Revision 2 (after review).** Two defects were corrected here: the flash claim in §2.3
+> (the erased run stops at `0xFFFFFFCF`, the last 48 bytes are the vector table, reset at
+> `0xFFFFFFFC`), and the fallback branch (an unmatched band returned 12000 because the
+> default was clobbered by the pointer load). Both are now covered by executable tests.
+
 Image `work/main_flat_fff00000.bin`, base `0xFFF00000`, 1,048,576 bytes.
 Companion documents: `BEEP_CALLGRAPH.md` (call graph), `CLOCK_AND_PATCH.md` (clock),
 `BAND_MAP.md` (band codes).
@@ -107,54 +112,109 @@ Untouched gaps: `+17..+23` (7 B), `+29..+35` (7 B), **`+111..+159` (49 B)**.
 **Proposal: `band_code` at `0x3AFC4 + 128`**, inside the largest gap, away from the
 hot fields (`+84` counter, `+46`, `+36`).
 
-### 2.3 Where the hook lives
+### 2.3 Where the hook lives — corrected
 
-The image contains one large erased run: **`0xFFFD0C0B`, 193,477 bytes of `0xFF`**
-to the end of flash. The hook is ~40 bytes:
+The earlier text claimed an erased region running "to the end of flash". **That was
+wrong**, and the review was right to reject it: the last 48 bytes are populated. The
+measured facts, reproducible with `tools/flash_map.py`:
+
+| region | contents |
+|---|---|
+| `0xFFF00000..0xFFFD0C0A` | code and data; last non-erased byte at `0xFFFD0C0A` |
+| `0xFFFD0C0B..0xFFFFFFCF` | erased, 193,477 bytes — the **only** run >= 64 B in the image |
+| `0xFFFFFFD0..0xFFFFFFFF` | **populated**: twelve 4-byte vector entries |
+| `0xFFFFFFFC` | reset vector `08 87 fa ff` -> `0xFFFA8708` |
+
+Decoded entries (little-endian dwords):
 
 ```
-band_period:
-    mov.l  #0x3afc4, r14      ; fb ee c4 af 03 00
-    movu.b 128[r14], r14      ; 59 ee 80
-    cmp    #0x10, r14         ; 75 5e 10      X
-    beq    .x
-    cmp    #0x20, r14         ; 75 5e 20      K
-    beq    .k
-    cmp    #0x30, r14         ; 75 5e 30      Ka
-    beq    .ka
-    cmp    #0x05, r14         ; 75 5e 05      Ka (second encoding)
-    beq    .ka
-.x: mov.l  #12000, r1         ; fb 1a e0 2e   (or fall through to stock)
-    rts                       ; 02
-.k: mov.l  #10000, r1         ; fb 1a 10 27
-    rts
-.ka:mov.l  #7500, r1          ; fb 1a 4c 1d
-    rts
-.def:mov.l #15000, r1         ; fb 1a 98 3a   unknown band -> stock
-    rts
+0xFFFFFFD0 0xFFFA9160   0xFFFFFFE0 0xFFFA9562   0xFFFFFFF0 0xFFFA9562
+0xFFFFFFD4 0xFFFA91AB   0xFFFFFFE4 0xFFFA9241   0xFFFFFFF4 0xFFFA9562
+0xFFFFFFD8 0xFFFA9562   0xFFFFFFE8 0xFFFA9562   0xFFFFFFF8 0xFFFA929E
+0xFFFFFFDC 0xFFFA91F6   0xFFFFFFEC 0xFFFA9562   0xFFFFFFFC 0xFFFA8708  reset
 ```
 
-`r1` is the only register written, which is exactly what the call sites expect
-(they were about to load `r1` anyway), so **no register save/restore is needed and
-no other live value changes**.
+`0xFFFA9562` repeats six times: the default-handler stub. So the erased run is bounded
+above by the vector table, not by the top of flash.
 
-### 2.4 Latency of the band byte
+Two cautions, because **erased is not free**:
 
-The write side is the remaining open item, and it is deliberately kept separate:
-whichever site latches the band must run **before** the sounder is armed. Two
-candidates, both plausible from the disassembly:
+* `0xFFFFFF00..0xFFFFFFCF` reads `0xFF` but lies where RX parts keep option-setting and
+  security memory. There `0xFF` is a *value* ("disabled"), not emptiness, so the tool
+  excludes the last 256 bytes even though they look blank.
+* one image proves nothing about another revision, which may hold calibration or keys
+  in the same run.
 
-* **A — latch at record registration.** At `0xFFF867EE` the band is already in
-  `r14` (`mov.l [r1], r14`). Storing it needs a base register: `0x3AFC4` is not in
-  a register at that point, so this needs 8 bytes, not 2 — it cannot be a pure
-  in-place swap and would need a small trampoline.
-* **B — latch where the sounder is armed** (the site that sets `0xAEB6` bit 5).
-  This is the natural place: the value is current by construction, and the byte is
-  then read microseconds later by the engine. Locating this site is the next task.
+Provisional candidate: **`0xFFFD0C0B..0xFFFFFEFF`**, 57 bytes needed. It stays
+provisional until a second image confirms the tail is byte-identical.
 
-Because the fallback is "no band latched → 15000", a stale or never-written byte
-degrades to **stock behaviour**, not to a wrong tone.
+The hook itself, 57 bytes, with the default loaded **only** on the unmatched path:
 
+```
+off  bytes          instruction
+00   fb12c4af0300   mov.l #0x3afc4, r1      ; base of the alert-state struct
+06   591180         movu.b 128[r1], r1     ; r1 = band code
+09   755110         cmp   #16, r1           ; X
+0c   2107           bne   0x15
+0e   fb12e02e0000   mov.l #12000, r1       ; X tone
+14   02             rts
+15   755120         cmp   #32, r1           ; K
+18   2107           bne   0x21
+1a   fb1210270000   mov.l #10000, r1       ; K tone
+20   02             rts
+21   755130         cmp   #48, r1           ; Ka
+24   2005           beq   0x2b
+26   755105         cmp   #5, r1            ; Ka, second spelling
+29   2107           bne   0x32
+2b   fb124c1d0000   mov.l #7500, r1        ; Ka tone
+31   02             rts
+32   fb12983a0000   mov.l #15000, r1       ; DEFAULT: only reached here
+38   02             rts
+```
+
+Only `r1` is written. At every patched site `r1` was about to be loaded anyway, so no
+other live value changes. The listing is byte-identical to the program exercised by
+`tools/test_band_period.py`.
+
+### 2.4 Latching the band, and why it cannot go stale
+
+The arming site was located this session: **`0xFFFA606E`**, a 23-byte leaf with 17 callers.
+
+```
+fffa606e:  sub   #4, r0
+fffa6070:  mov.b r1, 3[r0]          ; save the one argument
+fffa6072:  mov.l #0xaeb6, r14
+fffa6078:  bset  #5, [r14].b        ; ARM the sounder
+fffa607a:  mov.l #0x4c5d4, r14
+fffa6080:  mov.b 3[r0], 136[r14]    ; double-pulse flag = that argument
+fffa6084:  rtsd  #4
+```
+
+Its only argument is the double-pulse flag, so the band cannot be latched here without
+changing a signature shared by 17 call sites. Worse, those callers include UI paths —
+menu sounds arm the same bit — so a naive latch here would give menu beeps a radar pitch,
+which §2.5 forbids.
+
+The design therefore latches at the **alert-record processor**, where the band is already
+in a register, and writes on **every** record processed:
+
+* `0x10` / `0x20` / `0x30` / `0x05` / `0x80` -> store the code;
+* anything else -> store **0**.
+
+The hook whitelists codes, so 0 (or any unknown value) means "no radar band" and returns
+the stock 15000.
+
+Why that cannot be stale:
+
+| event | what keeps it correct |
+|---|---|
+| band changes X -> K | K's record is processed before K arms the sounder, so the byte is overwritten first |
+| alert ends | the engine is disarmed; the byte is only consulted on the next burst, which is preceded by that burst's own record |
+| non-radar arming (menu) | no radar record ran, so the zeroing write has left 0 and the beep stays stock |
+
+Residual case, stated rather than hidden: if the zeroing write does not run for an idle
+record, the first non-radar burst after a radar alert could sound at the previous pitch.
+That is the single reason the zeroing write is part of the contract.
 ### 2.5 Behaviour that is untouched by construction
 
 | behaviour | why it cannot change |
@@ -193,6 +253,29 @@ resolution over a 50 ms burst, not an arithmetic error: `15000000/12000 = 1250.0
 exactly. The firmware gets the exact value because it divides the clock by a
 16-bit register.
 
+### 3.1 Unit tests for the hook (`tools/test_band_period.py`)
+
+The hook's 57 bytes are executed by a small interpreter and asserted for **all 256**
+band values, and the interpreter's decoder is itself pinned to eight instructions lifted
+byte-for-byte out of the firmware (`fb12c4af0300` -> `mov.l #0x3afc4, r1`, etc.), so the
+opcodes are not merely assumed:
+
+```
+golden decode : 8 firmware instructions decoded identically
+layout        : 18 instructions, 57 bytes as intended
+band 0x10     : -> 12000  OK
+band 0x20     : -> 10000  OK
+band 0x30     : ->  7500  OK
+band 0x05     : ->  7500  OK
+fallback      : 252 other values -> 15000  OK
+staleness     : 0x00/0xFF/0x77/0x80 -> 15000  OK
+all tests passed
+```
+
+These tests caught a real defect in the first draft of §2.3: the default period was
+loaded into `r1` before `r1` became the base pointer, so an unmatched code returned the
+band byte itself (0x01 -> 1 tick). The default is now loaded on the unmatched path only.
+
 Double-pulse mode (`--mode double`) reproduces the same 50/30/80 train when the
 re-arm interval is 30 ms, because 30 ms gap plus 50 ms pulse equals the same
 period. The two modes only diverge when the detection path re-arms more slowly
@@ -206,11 +289,11 @@ affect pitch** and is left as an open behavioural question rather than guessed.
 | item | size | location |
 |---|---|---|
 | `band_code` | 1 byte | RAM `0x3AFC4+128` (inside an untouched 49-byte gap) |
-| `band_period()` | ~40 bytes | erased flash `0xFFFD0C0B` |
+| `band_period()` | 57 bytes | erased flash `0xFFFD0C0B` (provisional) |
 | call-site patches | 0 bytes net | 4-byte → 4-byte swap, in place |
 | band table | 0 | immediates, no table in flash |
 
-Total: **1 byte of RAM, ~40 bytes of flash**, no new allocation, no change to any
+Total: **1 byte of RAM, 57 bytes of flash**, no new allocation, no change to any
 existing structure's size.
 
 ---
@@ -241,7 +324,8 @@ existing structure's size.
 
 1. Locate the arming site (the `bset #5, [0xAEB6]` writer) and confirm `rec+0` is in
    scope there — this closes the last dataflow gap.
-2. Dump `0xFFFD0C0B..0xFFFFFF` from a second, independently obtained image and
-   confirm the tail is identical (i.e. erased, not board-specific).
+2. Obtain a second, independently sourced image and diff `0xFFFD0C0B..0xFFFFFFFF`.
+   Only if the tail is identical is the cave assumption usable. (The reset vector at
+   `0xFFFFFFFC` must read `08 87 fa ff` in both.)
 3. Re-derive `0x3AFC4`'s allocation size to confirm `+128` is inside it.
 4. Only then emit a patch plan, and only as a *plan* — no image.
