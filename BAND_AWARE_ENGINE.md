@@ -109,8 +109,15 @@ Scanning every access that dereferences `0x3AFC4` gives the live offsets:
 
 Untouched gaps: `+17..+23` (7 B), `+29..+35` (7 B), **`+111..+159` (49 B)**.
 
-**Proposal: `band_code` at `0x3AFC4 + 128`**, inside the largest gap, away from the
-hot fields (`+84` counter, `+46`, `+36`).
+> **WRONG — corrected in `LATCH_AND_CAVE.md`.** This section originally proposed
+> `0x3AFC4 + 128`. That address is `0x3B044`, which lies **inside the next global object**
+> (the one at `0x3B034`, bounded above by `0x3B218`). The `0x3AFC4` object is only
+> `0x3AFC4..0x3B033` (112 bytes), so `+128` would corrupt unrelated memory. Absence of code
+> references was never evidence of allocation; the neighbour globals are.
+>
+> Safe alternatives: read the band cache the firmware already maintains (see
+> `LATCH_AND_CAVE.md` Priority 1), or if a byte is truly needed, `+111` (`0x3B033`, the last
+> byte inside the object) or the holes at `+17..+23` / `+29..+35`.
 
 ### 2.3 Where the hook lives — corrected
 
@@ -145,8 +152,14 @@ Two cautions, because **erased is not free**:
 * one image proves nothing about another revision, which may hold calibration or keys
   in the same run.
 
-Provisional candidate: **`0xFFFD0C0B..0xFFFFFEFF`**, 57 bytes needed. It stays
-provisional until a second image confirms the tail is byte-identical.
+> **Placement rejected on alignment grounds.** `0xFFFD0C0B` is `0x40B` into a 2 KB erase
+> block that also holds live code ending at `0xFFFD0C0A`, so programming it would require
+> erasing and rewriting a block containing real instructions. Use an aligned erased block
+> instead — `0xFFFD1000` is 4 KB-aligned and 0xFF-filled. See `LATCH_AND_CAVE.md`
+> Priority 3.
+
+Provisional candidate: **`0xFFFD1000..0xFFFD1038`** (57 bytes), still provisional until a
+second image confirms the tail is byte-identical.
 
 The hook itself, 57 bytes, with the default loaded **only** on the unmatched path:
 
@@ -288,7 +301,7 @@ affect pitch** and is left as an open behavioural question rather than guessed.
 
 | item | size | location |
 |---|---|---|
-| `band_code` | 1 byte | RAM `0x3AFC4+128` (inside an untouched 49-byte gap) |
+| `band_code` | 1 byte — **only if no existing cache is used** | RAM `0x3AFC4+111`, not `+128` (unsafe): see `LATCH_AND_CAVE.md` |
 | `band_period()` | 57 bytes | erased flash `0xFFFD0C0B` (provisional) |
 | call-site patches | 0 bytes net | 4-byte → 4-byte swap, in place |
 | band table | 0 | immediates, no table in flash |
