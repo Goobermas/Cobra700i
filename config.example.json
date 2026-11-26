@@ -1,0 +1,18 @@
+{
+  "java_home": "",
+  "ghidra_home": "",
+  "project_dir": "work/ghidra/ghv3",
+  "project_name": "RAD700i_v3",
+  "program_name": "main_flat_fff00000.bin",
+  "processor": "RX:LE:32:RXv3",
+  "loader_base": "0xFFF00000",
+  "firmware": "work/main_flat_fff00000.bin",
+  "out_dir": "out/ghidra",
+  "funcs_dir": "out/ghidra/funcs",
+  "ghidra_scripts": "tools/ghidra_scripts",
+  "functions_csv": "out/ghidra/functions.csv",
+  "classification_seeds": "tools/analysis/classification_seeds.csv",
+  "stage_a_limit": 200,
+  "stage_b_limit": 400,
+  "max_attempts": 3
+}

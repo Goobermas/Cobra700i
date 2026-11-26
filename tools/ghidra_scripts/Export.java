@@ -10,8 +10,11 @@ public class Export extends GhidraScript {
         int limit = Integer.parseInt(System.getenv().getOrDefault("PASS_LIMIT","120"));
         int offset = Integer.parseInt(System.getenv().getOrDefault("PASS_OFFSET","0"));
         if (limit <= 0 || offset < 0) throw new IllegalArgumentException("Invalid export window");
-        Files.createDirectories(Paths.get("out/ghidra/funcs"));
-        Files.createDirectories(Paths.get("out/ghidra/passes"));
+        String output = System.getenv().getOrDefault("KALAB_OUT_DIR", "out/ghidra");
+        Path funcs = Paths.get(output, "funcs");
+        Path passes = Paths.get(output, "passes");
+        Files.createDirectories(funcs);
+        Files.createDirectories(passes);
         DecompInterface di = new DecompInterface(); di.openProgram(currentProgram);
         int n=0, done=0, ok=0; long total=currentProgram.getFunctionManager().getFunctionCount();
         for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
@@ -22,8 +25,8 @@ public class Export extends GhidraScript {
             DecompileResults d = di.decompileFunction(f, 45, monitor);
             if (!d.decompileCompleted() || d.getDecompiledFunction()==null)
                 throw new IOException("Decompiler failed at " + h + ": " + d.getErrorMessage());
-            File cFinal = new File("out/ghidra/funcs/"+h+".c");
-            File aFinal = new File("out/ghidra/funcs/"+h+".asm");
+            File cFinal = funcs.resolve(h+".c").toFile();
+            File aFinal = funcs.resolve(h+".asm").toFile();
             File cTmp = new File(cFinal.getPath()+".tmp");
             File aTmp = new File(aFinal.getPath()+".tmp");
             PrintWriter c = new PrintWriter(cTmp, StandardCharsets.UTF_8.name());
@@ -43,11 +46,11 @@ public class Export extends GhidraScript {
             ok++;
             done++;
             // atomic checkpoint after each function's files are written
-            FileOutputStream fo = new FileOutputStream("out/ghidra/passes/ctl.json.tmp");
+            FileOutputStream fo = new FileOutputStream(passes.resolve("ctl.json.tmp").toFile());
             fo.write(("{\"next\": "+(offset+done)+", \"done\": "+done+", \"total\": "+total
                       +", \"decompiled_ok\": "+ok+", \"last\": \""+h+"\"}").getBytes());
             fo.close();
-            Files.move(Paths.get("out/ghidra/passes/ctl.json.tmp"), Paths.get("out/ghidra/passes/ctl.json"),
+            Files.move(passes.resolve("ctl.json.tmp"), passes.resolve("ctl.json"),
                        StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
         }
         println("EXPORT offset="+offset+" done="+done+" ok="+ok+" total="+total);

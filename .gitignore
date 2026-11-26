@@ -31,3 +31,14 @@ tools/src/
 *.wav
 *.elf
 *.s19
+
+# Windows runner artifacts
+config.json
+dist/
+logs/
+results/
+out/ghidra/.analysis.lock
+out/ghidra/.stop.request
+__pycache__/
+*.pyc
+*.patch
