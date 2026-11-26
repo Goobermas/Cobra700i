@@ -12,3 +12,13 @@ __pycache__/
 /RAD_700i_*.bin
 /RAD_700i_*.mot
 /rad700i_main_research.zip
+
+# Reverse-engineering workspace (never commit)
+work/
+out/
+tools/ghidra/
+tools/ghidra.zip
+tools/jdk/
+tools/src/
+*.o
+*.sla
