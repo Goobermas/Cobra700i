@@ -1,82 +1,18 @@
 # Radar band → alert path (priority 1)
 
-All excerpts are from `work/main_full.dis` (binutils 2.42 `rx-elf`, image based at
-`0xFFF00000`), reproduced verbatim by `tools/dis_range.py LO HI`.
-`rec` = the alert record; `r0` is the display/alert context the handler works on.
+All excerpts from `work/main_full.dis` (binutils 2.42 `rx-elf`, image base `0xFFF00000`),
+reproduced by `tools/dis_range.py LO HI`. `rec` = alert record; `r0` = handler context.
 
 ---
 
-## What is proven
+## 1. Band codes — now proven
 
-The alert sound selection is **three stacked dispatch layers**, not one table. Each is
-located exactly; the values in each layer are known.
-
-### Layer 1 — handler selection on `12[rec]`
-
-```
-fff86313: mov.l 60[r0], r1        ; r1 = rec
-fff86315: mov.l 12[r1], r1        ; r1 = 32-bit field at offset 12
-fff86317: cmp   #0, r1
-fff86319: bne.s fff86320
-fff8631a: mov.l #0, [r0]          ; 0 -> nothing
-fff8631d: bra.w fff865a7
-fff86320: mov.l #3, r1
-fff86322: bsr.a fff7fa26          ; stop any current sound
-fff86326: bsr.a fffa7752          ; bclr #6,[0xC1280]   -- stop beep channel
-fff8632a: bset  #2, [0x8C022]  / bclr #0  / 61[0x4C5D4]=0
-fff8633d: bsr.a fff7f862          ; repaint framebuffer (0)
-fff86341: mov.l 60[r0], r1
-fff86343: mov.l 12[r1], r1
-fff86345: cmp   #6, r1 ; beq.w fff86598
-fff8634a: cmp   #2, r1 ; beq.w fff863cf     <-- colour + beep path
-fff8634f: cmp   #3, r1 ; beq.w fff86453
-fff86354: cmp   #4, r1 ; beq.w fff864f6
-fff86359: cmp   #5, r1 ; beq.w fff8652f
-fff8635e: cmp   #1, r1 ; bne.w fff865a4
-```
-
-`12[rec]` ∈ **1..6**. Only value **2** reaches the colour+beep block that priority 3
-patches; 1, 3, 4, 5 and 6 have their own handlers.
-
-### Layer 2 — band/colour index on `32[rec]`, and the beep
-
-```
-fff863cf: mov.l #0x8c022, r14
-fff863d4: bset  #2, [r14].b               ; audio/output enable
-fff863d6: mov.l 60[r0], r1
-fff863d8: movu.b 32[r1], r14              ; r14 = byte at offset 32
-fff863db: cmp   #5, r14 ; beq.b fff86447
-fff863df: cmp   #2, r14 ; beq.b fff86404
-fff863e3: cmp   #3, r14 ; beq.b fff86417
-fff863e7: cmp   #4, r14 ; beq.b fff8643b
-fff863eb: cmp   #1, r14 ; bne.w fff865a4
-```
-
-| `32[rec]` | colour (`0xFFF7F862`) | beep `0xFFFB2BA1` | extra |
-|---|---|---|---|
-| 1 | `0xFFFF` white | `0x3A98` | — |
-| 2 | `0x4FE0` cyan | `0x3A98` | — |
-| 3 | `0x537E` blue | `0x3A98` | `bset #0,[0x8C022]`, `61[0x4C5D4]=1` |
-| 4 | `0xF803` red | none | — |
-| 5 | `0xFFE0` yellow | none | — |
-| 0 / >5 | — | — | falls to `0xFFF865A4` |
-
-So there are **five band classes**, three of which beep, and all three beep at the same
-period. The beep sites are `0xFFF863F9` / `0xFFF8640C` / `0xFFF86430`.
-
-### Layer 3 — raw band/event code, and a second sound generator
-
-`0xFFF867A6` reads the **raw band byte at offset 33**:
-
-```
-fff867a6: movu.b 33[r14], r14
-```
-
-and a separate 32-bit **event code at offset 0 of `4[r0]`** is dispatched here:
+The dispatch at `0xFFF867EE` compares a 32-bit **event code** at `[4[r0] + 0]` against five
+values, and each branch formats a log line with a *different format string*:
 
 ```
 fff867ee: mov.l 4[r0], r1
-fff867f0: mov.l [r1], r14            ; 32-bit event code
+fff867f0: mov.l [r1], r14          ; event code
 fff867f2: cmp   #5,   r14 ; beq.b  fff86867
 fff867f6: cmp   #128, r14 ; beq.w  fff86894      ; 0x80
 fff867fc: cmp   #32,  r14 ; beq.b  fff8683a      ; 0x20
@@ -84,57 +20,150 @@ fff86801: cmp   #48,  r14 ; beq.b  fff86867      ; 0x30
 fff86806: cmp   #16,  r14 ; bne.w  fff868bf      ; 0x10
 ```
 
-Each branch collects four parameters from the record and calls the same generator:
+The string each branch loads is conclusive:
 
-```
-fff8680c: mov.l 4[r0], r1
-fff8680e: movu.b 64[r1], r2          ; level / SSM-ish
-fff86811: movu.b 4[r1],  r3
-fff86813: movu.b 25[r1], r4
-fff86815: add   #-20, r0, r0
-fff86818: mov.l r2, 16[r0]
-fff8681a: mov.l r3, 12[r0]
-fff8681c: mov.l r4,  8[r0]
-fff8681e: mov.l 20[r1], 4[r0]
-fff86822: mov.l #0xfff7395c, r14     ; pattern/sequence table
-fff86828: mov.l r14, [r0]
-fff8682a: mov.l #0x16b09, r1
-fff86830: bsr.a fffc6e00             ; sequence player(entry)
-fff86837: bra.w fff868bf
-```
+| branch | code | loads | string at that address |
+|---|---|---|---|
+| `0xFFF8680C` | **`0x10`** | `0xFFF86822: mov.l #0xfff7395c` | `"Alerting: X, Freq:%d, Lock:%d, SSM:%d, Hang:%d"` |
+| `0xFFF8683A` | **`0x20`** | `0xFFF86850: mov.l #0xfff7398c` | `"Alerting: K, Freq:%d, Lock:%d, SSM:%d, Hang:%d"` |
+| `0xFFF86867` | **`0x30` and `0x05`** | `0xFFF8687D: mov.l #0xfff739bc` | `"Alerting: Ka, Freq:%d, Lock:%d, SSM:%d,Hang:%d"` |
+| `0xFFF86894` | **`0x80`** | `0xFFF868AA: mov.l #0xfff739ec` | `"Alerting: MRCD, Freq:%d, Lock:%d, SSM:%d,Hang:%d"` |
 
-The constants `0x10` (X), `0x20` (K), `0x30` (Ka) and `0x80` (MRCD) recovered earlier are
-exactly the case values of this dispatch, plus a fifth case `5`. `0xFFFC6E00` with table
-`0xFFF7395C` is a **second, table-driven sound sequence generator**, separate from the
-`0xC1218` beep channel.
+**[C] Band codes: `0x10` = X, `0x20` = K, `0x30` = Ka, `0x05` = Ka (second Ka code),
+`0x80` = MRCD/MRCT.** Both Ka codes share one branch, so they are the same band family.
+
+This closes the earlier open item: the codes are no longer guesses from string proximity —
+each is tied to its own format string inside its own branch.
+
+**Correction to the previous revision of this file:** `0xFFF7395C` was described there as a
+"pattern table" fed to a sound generator. It is a **printf format string**, and
+`0xFFFC6E00` is the logging/format routine. This dispatch produces trace output; it does
+**not** produce audio.
 
 ---
 
-## What is NOT proven
+## 2. Laser is a separate path — and it does not beep
 
-**[O] The assignment of `0x10/0x20/0x30/0x80` to X / K / Ka / MRCD is not established by
-this trace.** The codes exist and are compared here, but the producer that *writes* the
-event code into offset 0 of the record — i.e. the code that turns a detected radar band
-into one of these constants — has not been located. Nor is the translation from band code
-(offset 33 / event code) to the 1..5 colour-and-beep index of layer 2 traced.
+Laser is **absent** from the five event codes above. It has its own handler, anchored by the
+string pointer literal found at `0xFFF79051`:
 
-Stating it plainly, because it matters for patching: **it is not yet proven which layer-2
-index is X, which is K, and which is Ka.** Patching the three beep sites would therefore
-change *some* three of the five band classes, and we cannot yet say which bands hear which
-new pitch. The hardware conclusion is unaffected — all beeping classes share one period —
-but a per-band pitch assignment is not safe to commit until this last link is traced.
+```
+fff79030: mov.l 104[r0], r1
+fff79032: add   #1, r1
+fff79034: mov.l r1, 104[r0]                 ; laser event counter
+fff79036: mov.l #0x3b218, r14
+fff7903c: movu.b 33[r14], r14               ; 0x3B239 -- laser logging enable
+fff7903f: cmp   #0, r14
+fff79041: beq.b fff7906f
+fff79043: mov.l #0x3b074, r14
+fff79049: sub   #8, r0
+fff7904b: mov.l 8[r14], 4[r0]               ; laser data field
+fff7904f: mov.l #0xfff72b51, r14            ; "Laser Alert: %d \n"
+fff79055: mov.l r14, [r0]
+fff79057: mov.l #0x16b09, r1
+fff7905d: bsr.a fffc6e00                    ; log
+fff79061: add   #8, r0
+fff79063: mov.l #0x7e53c, r14
+fff79069: mov.l [r14], r1
+fff7906b: bsr.a fff87dd2                    ; laser alert post-processing
+fff7906f: mov.l #0x3ab2c, r14
+fff79075: mov.l [r14], r14
+fff79077: mov.l [r14], 92[r0]
+fff7907a: mov.l #0x3ab2c, r14
+fff79080: mov.l [r14], r14
+fff79082: mov.l #0x3b034, r15
+fff79088: mov.l [r14], 36[r15]
+fff7908b: mov.b #0, 111[r0]
+fff7908f: mov.l #0, 100[r0]
+fff79092: bra.w fff79205
+fff79095: mov.l 104[r0], r2
+fff79097: mul   #68, r2
+fff7909a: mov.l #0x397a8, r1
+fff790a0: add   r2, r1
+```
 
-Next concrete step: find the writers of the record fields `[rec+0]`, `[rec+32]`, `[rec+33]`.
-The detector's own trace string `Alerting: X, Freq:%d, Lock:%d, SSM:%d, Hang:%d` sits in
-the same module (`0xFFF86700` region), so the band byte is almost certainly produced in
-that call chain; breakpointing one X alert and one K alert on hardware would settle it in
-minutes.
+**[C] There is no `0xFFFB2BA1` call anywhere in this handler**, so laser does not configure
+the PWM beep channel. Laser's audible alert must come from the clip/voice path or from
+`0xFFF87DD2`, not from the `0xC1218` beep.
 
 ---
 
-## Correction to earlier notes
+## 3. The audio path (layer 2) and why only three branches beep
 
-An earlier draft described "alert type dispatch on `32[r1]`" as *the* dispatch. It is the
-**second** of three layers. The first (`12[rec]`) is what chooses the handler, and the
-third (`[rec+0]`) drives the table-based sequence generator. Layer 2 is the only one that
-starts the beep channel.
+The colour+beep block is reached only from layer 1 (`12[rec] == 2`) and dispatches on a
+**byte at `32[rec]`**, five values, of which exactly three start a beep:
+
+```
+fff863d6: mov.l 60[r0], r1
+fff863d8: movu.b 32[r1], r14
+fff863db: cmp   #5, r14 ; beq.b fff86447     ; colour only
+fff863df: cmp   #2, r14 ; beq.b fff86404     ; colour + beep
+fff863e3: cmp   #3, r14 ; beq.b fff86417     ; colour + beep + 0x8C022 bit0
+fff863e7: cmp   #4, r14 ; beq.b fff8643b     ; colour only
+fff863eb: cmp   #1, r14 ; bne.w fff865a4     ; colour + beep
+```
+
+| `32[rec]` | colour | PWM period | notes |
+|---|---|---|---|
+| 1 | `0xFFFF` white | `0x3A98` at `0xFFF863F9` | |
+| 2 | `0x4FE0` cyan | `0x3A98` at `0xFFF8640C` | |
+| 3 | `0x537E` blue | `0x3A98` at `0xFFF86430` | also `bset #0,[0x8C022]`, `61[0x4C5D4]=1` |
+| 4 | `0xF803` red | — | no beep |
+| 5 | `0xFFE0` yellow | — | no beep |
+
+**Why three:** the PWM period is written by exactly the branches that also call
+`0xFFFB2BA1`. Branches 4 and 5 are colour-only, so they get their sound from somewhere else
+— the same conclusion the laser evidence points to. Any class that does not reach
+`0xFFFB2BA1` cannot use the beep channel.
+
+---
+
+## 4. What is still NOT proven — and why I am not guessing
+
+`32[rec]` is a **five-value audio class**, and the event-code dispatch has **five values**
+(`0x05`, `0x10`, `0x20`, `0x30`, `0x80`). The counts match, but **the correspondence is not
+established**: no writer of `32[rec]` exists in the form the compiler normally emits
+(`mov.b #imm, 32[reg]` and `mov.b reg, 32[reg]` both return **zero** matches in the whole
+1 MiB image), and the field is not set through an `add #32` base either. It is most likely
+written as part of a 4-byte or wider store that covers bytes 32–35, or by a struct copy;
+either way the transform band-code → audio-class was not located.
+
+So, explicitly: **the three PWM branches are audio classes 1, 2 and 3. I cannot prove
+which of those is X, K or Ka.** Two orderings remain possible (e.g. 1/2/3 = X/K/Ka, or
+1/2/3 = Ka/X/K, etc.), and choosing one would be exactly the assumption this task forbids.
+
+The display-name table does **not** resolve it: it is a localised *label* table, ordered
+X, K-low, K, Ka, Laser, MultaRadar, LowVoltage with an EN/ES pair each —
+
+```
+0xFFF57C4C -> 'X BAND'      0xFFF57C50 -> 'BANDA X'
+0xFFF57C54 -> 'K LOW BAND'  0xFFF57C58 -> 'BANDA K BAJA'
+0xFFF57C5C -> 'K BAND'      0xFFF57C60 -> 'BANDA K'
+0xFFF57C64 -> 'KA BAND'     0xFFF57C68 -> 'BANDA KA'
+0xFFF57C6C -> 'LASER'       0xFFF57C70 -> 'LASER'
+0xFFF57C74 -> 'MULTARADAR'  0xFFF57C78 -> 'MULTARADAR'
+0xFFF57C7C -> 'LOW V. WARN' 0xFFF57C80 -> 'LOW V. WARN'
+```
+
+— which is a UI string table indexed by band, not by audio class (seven bands, not five
+classes; and it contains no MRCD entry under that name).
+
+### The two tests that would settle it
+
+1. **Hardware, definitive:** breakpoint on `0xFFF863D8` (`movu.b 32[r1], r14`) and read
+   `r14` during one X alert and one K alert. Five minutes with an E1/E2 and one detection.
+2. **Static, slower:** find the writer by searching for the alert-record constructor —
+   the object at `60[r0]` is produced by the caller of this handler; walking its callers
+   and watching which routine zero-initialises bytes 30–40 (as `0xFFF862E3`–`0xFFF86311`
+   does for a neighbouring record) will expose the assignment.
+
+Until one of these is done, any per-band pitch assignment stays unproven and is not
+implemented.
+
+---
+
+## 5. Correction to earlier notes
+
+An earlier revision called `32[r1]` *the* dispatch and `0xFFF7395C` a sound table. Corrected
+here: there are three layers — `12[rec]` (handler), `32[rec]` (audio class), `[rec+0]`
+(event code, logging) — and the layer-3 target is a format string, not audio.

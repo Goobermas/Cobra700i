@@ -58,6 +58,61 @@ Mode 2 modifies only bit 17 of SCKCR — a *divider* bit, not a PLL change — a
 start bit and the mode bytes at `0xC1202`/`0xC1204`/`0xC1205`. The counter therefore runs
 on the **undivided** clock of that block.
 
+### The divider fields — and the clock that feeds the timer [C]
+
+`0xFFFAA2A8` writes a whole 32-bit value into SCKCR, which is where the **PCLK dividers**
+actually get set:
+
+```
+fffaa2a8: sub   #8, r0
+fffaa2aa: mov.l #0, 4[r0]
+fffaa2ad: mov.l #0, [r0]
+fffaa2b0: mov.w #0xa50b, 990[0x80020]    ; unlock
+fffaa2bb: bsr.w fffaa3a7                 ; PLL setup
+fffaa2be..: 4[r0] |= bit29 ; bit17 ; ~bit23
+fffaa2d0: bset  #0, 16[0x80020]          ; 0x80030 bit 0
+fffaa2e6: 4[r0] |= bit12
+fffaa2ec: 4[r0] |= bit9
+fffaa2f2: 4[r0] |= bit5
+fffaa2f8: 4[r0] |= bit1
+fffaa301: 4[r0] &= 0xf0f0ffff            ; clears bits 16-19 and 20-23
+fffaa30b: 4[r0] |= 0x2020000             ; sets bit 17 and bit 25
+fffaa315: mov.l 4[r0], [0x80020]         ; commit to SCKCR
+```
+
+With the RX SCKCR field order (PCKD 0-3, PCKC 4-7, PCKB 8-11, PCKA 12-15, ICK 16-19,
+FCK 20-23) the individual `bset`s decode as:
+
+| bit set | field | value | divider |
+|---|---|---|---|
+| 1 | PCKD | `0b0010` | **PCLKD = ICLK / 2** |
+| 5 | PCKC | `0b0010` | **PCLKC = ICLK / 2** |
+| 9 | PCKB | `0b0010` | **PCLKB = ICLK / 2** |
+| 12 | PCKA | `0b0001` | **PCLKA = ICLK / 1** |
+| 17 | ICK | `0b0010` | ICLK = PLL / 2 |
+
+So the peripheral buses are **not** all the same speed: PCLKA runs at the full ICLK, and
+PCLKB/C/D at half of it. With mode 2's recorded **ICLK = 30 MHz**:
+
+* **PCLKA = 30 MHz** → beep = 30 000 000 / 15 000 = **2000 Hz**
+* PCLKB = PCLKC = PCLKD = 15 MHz → beep = **1000 Hz**
+
+The RX timers that pair a period register with a 50 % compare (MTU3/GPT) are normally
+clocked from **PCLKA**, which selects **2000 Hz** as the best-supported answer. **[O]** it is
+still not proven, because the part number is unavailable and so the block's clock-select is
+unverifiable.
+
+### Physical measurement that resolves it
+
+1. Scope or frequency counter on the **buzzer drive pin** (the pin whose direction bit is
+   `0x8C022` bit 2) while a menu/self-test beep is sounding. The reading is one of
+   2000.0 / 1000.0 / 4000.0 Hz and identifies both the bus and the divider in one shot.
+2. No scope: place a phone recorder next to the detector, capture a self-test beep, and FFT
+   it. The candidates are an octave apart, so even a lossy recording separates them; the
+   measured peak converted back gives `f_timer = f_peak × 15000`.
+3. Cross-check: `f_timer / 500 / 10` should land on 60 MHz (PLL) for either answer, which
+   independently confirms mode 2's PLL multiplier.
+
 ### Peripheral-clock derivation [C, partial]
 
 The helper at `0xFFFAA209`–`0xFFFAA2A2` computes the peripheral frequency from SCKCR3 and
