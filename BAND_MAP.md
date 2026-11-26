@@ -188,3 +188,11 @@ implemented.
 An earlier revision called `32[r1]` *the* dispatch and `0xFFF7395C` a sound table. Corrected
 here: there are three layers — `12[rec]` (handler), `32[rec]` (audio class), `[rec+0]`
 (event code, logging) — and the layer-3 target is a format string, not audio.
+
+---
+
+## See also
+
+`BEEP_CALLGRAPH.md` traces the alert path to the actual tone routine and shows why
+this file's "audio class" question had no answer: the five-way field is a display
+colour index, and the firmware contains exactly one radar tone.
