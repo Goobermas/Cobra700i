@@ -79,6 +79,8 @@ class CPU:
             v = imm[0] | (imm[1] << 8) | (imm[2] << 16) | (imm[3] << 24)
             if sub == 0x12:
                 self.r[1] = v
+            elif sub == 0x22:
+                self.r[2] = v
             elif sub == 0xe2:
                 self.r[14] = v
             else:
