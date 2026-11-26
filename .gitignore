@@ -22,3 +22,12 @@ tools/jdk/
 tools/src/
 *.o
 *.sla
+# Defense-in-depth: vendor images and generated analysis archives at any depth.
+*.bin
+*.mot
+*.srec
+*.hex
+*.zip
+*.wav
+*.elf
+*.s19
