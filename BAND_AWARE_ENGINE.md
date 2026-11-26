@@ -92,7 +92,7 @@ The swap is attractive because both instructions are exactly **4 bytes**:
 
 ```
 stock:   fb 1a 98 3a        mov.l #0x3a98, r1
-patched: 05 c0 cf 03        bsr.a 0xfffd0c0b     ; disp = target - (site + 4)
+patched: 05 b5 d3 03        bsr.a 0xfffd1000     ; disp = target - (site + 4)
 ```
 
 No site grows, no site moves, and every following address is unchanged — which

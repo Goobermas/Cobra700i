@@ -25,7 +25,7 @@ import bandaware_sim as sim                                  # noqa: E402
 IMAGE = Path("work/main_flat_fff00000.bin")
 BASE = 0xFFF00000
 
-HOOK_ADDR = 0xFFFD0C0B
+HOOK_ADDR = 0xFFFD1000   # 4 KB-aligned, inside an erased block (was 0xFFFD0C0B)
 STOCK_BYTES = bytes.fromhex("fb1a983a")      # mov.l #0x3a98, r1
 
 # The five sites that actually feed the radar tone: the sounder engine's two
@@ -134,9 +134,12 @@ def s7_cave_alignment():
         rem = HOOK_ADDR % blk
         print(f"  S7 hook 0x{HOOK_ADDR:08X} offset in a {blk//1024} KB erase block: "
               f"0x{rem:X} {'(aligned)' if rem == 0 else '(NOT aligned - shares a block with code)'}")
-    aligned = 0xFFFD1000
-    assert aligned % 0x1000 == 0 and aligned >= 0xFFFD0C0B
-    print(f"     aligned alternative: 0x{aligned:08X}")
+    assert HOOK_ADDR % 0x1000 == 0, "hook must sit at the start of an erase block"
+    assert HOOK_ADDR >= 0xFFFD0C0B, "hook must be past the last non-erased byte"
+    img = IMAGE.read_bytes()
+    window = img[HOOK_ADDR - BASE: HOOK_ADDR - BASE + 64]
+    assert set(window) == {0xFF}, "hook block is not fully erased"
+    print(f"     chosen 0x{HOOK_ADDR:08X} is 4 KB-aligned and its 64-byte window is all 0xFF")
 
 
 def main():
