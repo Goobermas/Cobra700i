@@ -1,0 +1,11 @@
+addr,category,confidence,evidence,semantic_name
+0xFFFA8708,Initialization/interrupt handling,VERIFIED,Reset vector 0xFFFFFFFC and USP/ISP/INTB initialization in BOOT_SEQUENCE.md,reset_handler
+0xFFFB2BA1,Audio,VERIFIED,16-bit timer writes to 0xC1218 and 0xC121A; checked with RXv3 decompiler in AUDIO_HW.md,tone_pwm
+0xFFF93BCF,Audio,PROBABLE,50 ms/30 ms radar sounder state-machine analysis in BEEP_CALLGRAPH.md,radar_sounder
+0xFFFA606E,Audio,PROBABLE,Arms bit 5 at 0xAEB6 as described in ALERT_PATH.md,arm_beep
+0xFFF866B9,Alert processing,PROBABLE,Reads four 68-byte alert records and logs X/K/Ka/MRCD as described in ALERT_PATH.md,alert_record_log
+0xFFFC8B56,C standard runtime,PROBABLE,Reported mode-byte tests r/w/a and EINVAL in latest private RXv3 disassembly; strings need independent confirmation,fopen_like
+0xFFFC6D31,C standard runtime,PROBABLE,Reported cleanup then open-wrapper behavior in latest private disassembly,freopen_like
+0xFFFC6D60,C standard runtime,PROBABLE,Reported stream flag and buffer-release behavior in latest private disassembly,stream_cleanup_like
+0xFFFA8422,Initialization/interrupt handling,PROBABLE,Three 72-byte stream objects reportedly initialized via stdio wrapper in private disassembly,stdio_init_like
+0xFFFA850A,Initialization/interrupt handling,PROBABLE,One-shot walk over stream pointers at 0x6AA14 in BOOT_SEQUENCE.md,stdio_cleanup_like
