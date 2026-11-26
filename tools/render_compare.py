@@ -22,8 +22,13 @@ FS = 48000
 PERIOD = 15000                      # 0x3A98, the firmware constant
 # 50 ms on, 30 ms off, 50 ms on -- unchanged from the original
 ORIGINAL_SEGMENTS = [(50, True), (30, False), (50, True)]
-CLOCKS = [("60MHz", 60_000_000), ("30MHz", 30_000_000), ("15MHz", 15_000_000)]
-PROPOSED = {"X": 1000, "K": 1400, "Ka": 2000, "LASER": 2600}
+# 15 MHz is the measured timer clock (CLOCK_AND_PATCH.md: 999.98 Hz x 15000).
+# The others are kept only to show sensitivity if that measurement is revised.
+CLOCKS = [("15MHz", 15_000_000), ("30MHz", 30_000_000), ("60MHz", 60_000_000)]
+
+# At 15 MHz the stock beep (period 15000) is already 1000 Hz, so the proposed
+# targets deliberately avoid 1000 Hz.  period = 15e6 / f, all <= 0xFFFF.
+PROPOSED = {"X": 1250, "K": 1500, "Ka": 2000, "LASER": 2500}
 
 
 def square(freq, ms, fs=FS, ramp_ms=1.5):

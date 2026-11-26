@@ -120,13 +120,32 @@ fff863eb: cmp   #1, r14 ; bne.w fff865a4     ; colour + beep
 
 ## 4. What is still NOT proven — and why I am not guessing
 
-`32[rec]` is a **five-value audio class**, and the event-code dispatch has **five values**
-(`0x05`, `0x10`, `0x20`, `0x30`, `0x80`). The counts match, but **the correspondence is not
-established**: no writer of `32[rec]` exists in the form the compiler normally emits
-(`mov.b #imm, 32[reg]` and `mov.b reg, 32[reg]` both return **zero** matches in the whole
-1 MiB image), and the field is not set through an `add #32` base either. It is most likely
-written as part of a 4-byte or wider store that covers bytes 32–35, or by a struct copy;
-either way the transform band-code → audio-class was not located.
+### Correction: an earlier claim in this file was based on a broken search
+
+A previous revision stated that no writer of `32[rec]` exists, because `mov.b #imm, 32[reg]`
+and `mov.b reg, 32[reg]` returned zero matches. **That search was invalid**: the patterns
+contained `\t`, which `grep -E` does not expand, so they were searching for a literal `t`.
+Re-run with a correct parser over all 373,310 instructions, the real census is:
+
+| access | count |
+|---|---|
+| readers `movu.b 32[rX]` | **63** |
+| stores `mov.b #0/#1, 32[rX]` | ~166 |
+| stores of any other constant | **1** (`0xFFF7F147: mov.b #4, 32[r14]`) |
+| stores `mov.b rX, 32[rY]` | 52 |
+| stores `mov.b #16/#32/#48/#128, 33[…]` | **0** |
+| stores `mov.b rX, 33[rY]` | 5 (`0xFFF98C80`, `0xFFFA25F3`, `0xFFFA2692`, `0xFFFC92E9`, `0xFFFC92F8`) |
+
+That census **undermines the "five-value class" reading** rather than confirming it: byte 32
+is overwhelmingly a 0/1 flag with 63 readers, and the only other constant ever stored into it
+is `#4`. A field that only ever holds 0/1 cannot exercise branches comparing it against 2, 3
+and 5. So either the item at `60[r0]` is not the object compared at `0xFFF863D8`, or the
+1..5 comparisons are on a field written by a path the census does not show (a wider store, a
+struct copy, or the register stores above).
+
+**Net effect: the band → audio-class mapping is not merely unproven, the static evidence for
+the five-class model is now doubtful.** I am not going to resolve that by eye; it needs the
+runtime value.
 
 So, explicitly: **the three PWM branches are audio classes 1, 2 and 3. I cannot prove
 which of those is X, K or Ka.** Two orderings remain possible (e.g. 1/2/3 = X/K/Ka, or
@@ -151,7 +170,9 @@ classes; and it contains no MRCD entry under that name).
 ### The two tests that would settle it
 
 1. **Hardware, definitive:** breakpoint on `0xFFF863D8` (`movu.b 32[r1], r14`) and read
-   `r14` during one X alert and one K alert. Five minutes with an E1/E2 and one detection.
+   `r14` **and the object `r1` points at** during one X alert and one K alert. Given the
+   census above, dump 48 bytes from `r1` as well — that shows which offset actually carries
+   the band, even if it is not 32. Five minutes with an E1/E2 and one detection.
 2. **Static, slower:** find the writer by searching for the alert-record constructor —
    the object at `60[r0]` is produced by the caller of this handler; walking its callers
    and watching which routine zero-initialises bytes 30–40 (as `0xFFF862E3`–`0xFFF86311`

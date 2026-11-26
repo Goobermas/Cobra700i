@@ -4,6 +4,82 @@ Companion to `AUDIO_HW.md`. Excerpts from `work/main_full.dis`, image base `0xFF
 
 ---
 
+## Measured — the clock question is answered
+
+An acoustic recording of a real Ka-band alert, supplied by the device owner, measured:
+
+| quantity | measured | used for |
+|---|---|---|
+| fundamental | 999.98 Hz | timer clock = f x period |
+| 3rd harmonic | ~3000 Hz | confirms square wave (50 % duty), matches the PWM model |
+| pulse on | ~50 ms | tick unit |
+| gap | ~30 ms | tick unit |
+| repetition period | ~80 ms | 50 on + 30 off |
+
+### What this proves
+
+* **[C] The 0xC1218 timer clock is ~15 MHz.** 999.98 Hz x 15 000 ticks = 14,999,700 Hz, i.e.
+  **15 MHz to within 20 ppm** of the measurement. Nothing else in the clock tree lands there.
+* **[C] The tick counter `0x3AFC4+84` counts milliseconds.** The engine compares it against
+  50 and 30 (`0xFFF93C62`, `0xFFF93CB9`), and the recording shows 50 ms and 30 ms. This
+  closes the open question in `AUDIO_HW.md` §7 — the cadence thresholds are milliseconds.
+* **[C] The envelope is the double pulse**, 50 on / 30 off / 50 on, i.e. the branch taken
+  when `0x4C5D4+136 == 1`, repeating every 80 ms.
+* **[C] The duty is 50 %**, because a 3rd harmonic at 3x the fundamental with that relative
+  strength is the square-wave signature, and `0xC121A = (d-1)>>1` guarantees it.
+
+### Which divider produces 15 MHz
+
+The SCKCR write at `0xFFFAA2E6`-`0xFFFAA2F8` sets, per the RX field order:
+
+| bit | field | value | divider |
+|---|---|---|---|
+| 12 | PCKA | `0b0001` | PCLKA = ICLK / **1** |
+| 9 | PCKB | `0b0010` | PCLKB = ICLK / **2** |
+| 5 | PCKC | `0b0010` | PCLKC = ICLK / **2** |
+| 1 | PCKD | `0b0010` | PCLKD = ICLK / **2** |
+
+15 MHz is therefore **one half of the 30 MHz figure mode 2 records**, which means the audio
+timer sits on **PCLKB, PCLKC or PCLKD — not PCLKA**. Only two clock trees can produce that,
+and they differ in where the 30 MHz sits:
+
+| reading | PLL | ICK (bits 16-19) | ICLK | PCLKA | PCLKB/C/D | timer |
+|---|---|---|---|---|---|
+| A | 60 MHz | /2 | 30 MHz | 30 MHz | **15 MHz** | PCLKB/C/D |
+| B | 30 MHz | /2 | 15 MHz | 15 MHz | 7.5 MHz | PCLKA |
+
+Reading **B would put PCLKA at 15 MHz too**, so both readings agree on the timer getting
+15 MHz — which is the number that matters for pitch. They disagree only on the CPU clock,
+and the recording cannot separate them. Reading **A** is the better fit because the firmware
+then stores the correct ICLK (30 MHz) in its own delay-table field at `0x3AB38+172`, which
+`0xFFFA8797(ms, scale)` uses; if ICLK were really 15 MHz every firmware delay would run at
+half speed, and the measured 50/30 ms envelope (driven by a hardware tick, not by a delay
+loop) would still look correct, so this is a consistency argument, not proof.
+
+**[O] What is still formally unproven:** which of PCLKB / PCLKC / PCLKD feeds the block, and
+whether reading A or B is the true tree. Both are irrelevant to the tone work — the timer
+input is 15 MHz either way.
+
+### Recalibrated tone table at the measured clock
+
+`period = 15 000 000 / f`, and the current beep is `15 000 000 / 15 000 = 1000 Hz`:
+
+| band | target | period register | instruction bytes |
+|---|---|---|---|
+| (current) | 1000 Hz | 15000 = `0x3A98` | `fb 1a 98 3a` |
+| X | 1250 Hz | 12000 = `0x2EE0` | `fb 1a e0 2e` |
+| K | 1500 Hz | 10000 = `0x2710` | `fb 1a 10 27` |
+| Ka | 2000 Hz | 7500 = `0x1D4C` | `fb 1a 4c 1d` |
+| LASER | 2500 Hz | 6000 = `0x1770` | `fb 1a 70 17` |
+
+X is deliberately **not** 1000 Hz: at the measured clock the existing beep already is
+1000 Hz, so a 1000 Hz X target would change nothing. Note also that at 15 MHz the lowest
+reachable tone is 15e6/65535 = 229 Hz, so the 16-bit period is never the limiting factor.
+
+---
+
+---
+
 ## Priority 2 — the timer clock
 
 ### What the firmware does with the clock
@@ -97,10 +173,10 @@ PCLKB/C/D at half of it. With mode 2's recorded **ICLK = 30 MHz**:
 * **PCLKA = 30 MHz** → beep = 30 000 000 / 15 000 = **2000 Hz**
 * PCLKB = PCLKC = PCLKD = 15 MHz → beep = **1000 Hz**
 
-The RX timers that pair a period register with a 50 % compare (MTU3/GPT) are normally
-clocked from **PCLKA**, which selects **2000 Hz** as the best-supported answer. **[O]** it is
-still not proven, because the part number is unavailable and so the block's clock-select is
-unverifiable.
+**Superseded by the measurement above.** An undivided ICLK on PCLKA would give 2000 Hz, and
+the recording shows 999.98 Hz, so the audio timer is **not** on PCLKA: it is on a
+PCLKB/C/D-class clock at 15 MHz, or reading B applies and PCLKA itself is 15 MHz. Either way
+the timer input is 15 MHz and the beep is 1000 Hz.
 
 ### Physical measurement that resolves it
 
@@ -236,7 +312,9 @@ at the clock the hardware actually uses; the rhythm is identical by construction
 
 ## Still blocking a firmware release
 
-1. PCLK number (above) — needs one measurement or the part number.
+1. ~~PCLK number~~ — **resolved by measurement: 15 MHz** (measured section above).
+   Remaining detail only: which of PCLKB/C/D feeds the block, and whether the PLL tree
+   is reading A or B; neither changes the tone arithmetic.
 2. Which layer-2 index is X / K / Ka (`BAND_MAP.md`).
 3. Updater/bootloader validation and recovery path — still unverified (closed-source
    installer, not runnable here).
