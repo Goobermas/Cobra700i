@@ -108,7 +108,7 @@ fff93bdc:  mov.l #0xaeb6, r14
 fff93be2:  movu.b [r14], r14
 fff93be4:  bfmovz #5, #0, #1, r14, r14
 fff93be9:  cmp   #0, r14
-fff93beb:  beq.w fff93d2a            ; returns when bit 5 of 0xAEB6 is SET
+fff93beb:  beq.w fff93d2a            ; returns unless bit 5 of 0xAEB6 is SET (armed)
 fff93bee:  mov.l #0x3afc4, r1
 fff93bf4:  mov.l 84[r1], r2
 fff93bf6:  add   #1, r2
@@ -128,6 +128,14 @@ The state byte `0x19DE3` selects the branch; the counter `84[0x3AFC4]` is compar
 | 3 | at counter == **30**: counter=0, state=4 | 4 |
 | 4 | `tone(15000)` (`0xFFF93CD9`), counter=0, state=5 | 5 |
 | 5 | at counter == **50**: stop, `bclr #5,[0xAEB6]`, clear pin, state=0 | 0 |
+
+**Correction (forced by the measured alert).** An earlier revision of this file read
+the gate the other way round. Simulating that reading makes each burst end by clearing
+the bit that keeps it running, so the machine retriggers itself after ~2 ms and the
+period comes out at 133 ms, which the recorded 50/30/80 ms refutes. The correct
+reading is that the engine runs only while bit 5 is **set**, and both burst ends
+`bclr #5` to **disarm** it: the 30 ms silence is the interval until the detection path
+re-arms it. See `BAND_AWARE_ENGINE.md` §1.3.
 
 That is **50 ms on / 30 ms off / 50 ms on, repeating every 80 ms** — precisely the measured
 Ka cadence. The `136[0x4C5D4]` branch selects single beep (state 0 → 2 → 0) versus double.
