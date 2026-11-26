@@ -2,6 +2,13 @@
 
 Continues `5946424c`. No firmware was built, modified or flashed.
 
+> **Correction (`LATCH_TRAMPOLINE.md`).** The "zero writes" result below is wrong. `0x3BF88`
+> *is* written — through computed pointers (`0x3BF88 + 68*slot`, e.g. `0xFFF777BE`), which a
+> literal-lookup scan cannot see. It is a 4-entry × 68-byte array, not a scalar. The weaker
+> conclusion still holds, for a different reason: no *single* global holds the current band,
+> because the active slot index lives in a caller-supplied context (`11[r0]`). The method
+> lesson is recorded in `LATCH_TRAMPOLINE.md` §5.
+
 ## Verdict
 
 **No. `0x3BF88` cannot be the live radar band, because no instruction in the image ever
