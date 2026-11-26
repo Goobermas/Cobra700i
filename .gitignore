@@ -7,3 +7,8 @@ __pycache__/
 /tools/binutils.tar.xz
 /tools/*.log
 /tools/build.status
+
+# vendor firmware images, disassembly dumps and research archives are never committed
+/RAD_700i_*.bin
+/RAD_700i_*.mot
+/rad700i_main_research.zip
